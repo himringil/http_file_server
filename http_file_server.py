@@ -7,10 +7,6 @@ from string import ascii_lowercase, digits
 from shutil import copyfileobj
 import argparse, hashlib, sys, contextlib, daemon
 from daemon import pidfile
-import logging
-
-hostName = 'localhost'
-serverPort = 8080
 
 class HTTPFileServer(HTTPServer):
     def __init__(self, store_path: str = '.', block_size: int = 512*1024*1024, *args, **kwargs):
@@ -58,13 +54,13 @@ class HTTPFileRequest(BaseHTTPRequestHandler):
         tmp_path = join(tmp_path, ''.join(choices(ascii_lowercase + digits, k=16)))
         
         # get hash of file and write to temp file            
-        with open(tmp_path, 'w') as tmp_file:
+        with open(tmp_path, 'wb') as tmp_file:
             length = int(self.headers['content-length'])
             h = hashlib.md5()
             data = self.rfile.read(min(length, block_size))
             while length > 0:
                 h.update(data)
-                tmp_file.write(data.decode())
+                tmp_file.write(data)
                 length -= len(data)
                 data = self.rfile.read(min(length, block_size))
         
@@ -79,7 +75,7 @@ class HTTPFileRequest(BaseHTTPRequestHandler):
             self._response(409, f'File {h.hexdigest()} already exists\n')
             return
             
-        # move file to required directory with and rename
+        # move file to required directory and rename
         rename(tmp_path, store_path)
         self._response(200, f'{h.hexdigest()}\n')
         
@@ -108,21 +104,25 @@ class HTTPFileRequest(BaseHTTPRequestHandler):
                 pass
         
         self._response(200, f'Deleted {h}\n')
+        
 
 def parse_args():
     parser = argparse.ArgumentParser(description='HTTP file server.')
+    parser.add_argument('--port', type=int, default=8080,
+                        help='server port')
     parser.add_argument('--store_path', metavar='-s', type=str, default='.',
                         help='path to file storage')
     parser.add_argument('--block_size', metavar='-b', type=int, default=512*1024*1024,
                         help='buffer size for reading file content')
-    parser.add_argument('--pid_file', metavar='-p', default='/var/run/http_file_server.pid')
+    parser.add_argument('--pid_file', metavar='-p', default='/var/run/http_file_server.pid',
+                        help='path to pidfile')
     args = parser.parse_args()
-    return args.store_path, args.block_size, args.pid_file
+    return args.port, args.store_path, args.block_size, args.pid_file
 
 
 if __name__ == '__main__':
-    store_path, block_size, pid_file = parse_args()
-    server = HTTPFileServer(store_path, block_size, (hostName, serverPort), HTTPFileRequest)
+    port, store_path, block_size, pid_file = parse_args()
+    server = HTTPFileServer(store_path, block_size, ('localhost', port), HTTPFileRequest)
 
     daemon_context = daemon.DaemonContext(pidfile=pidfile.TimeoutPIDLockFile(pid_file))
     daemon_context.files_preserve = [server.fileno()]
